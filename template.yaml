@@ -1,0 +1,130 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  telemetry-collector
+
+  Sample SAM Template for telemetry-collector
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Timeout: 5
+    MemorySize: 128
+
+    # You can add LoggingConfig parameters such as the Logformat, Log Group, and SystemLogLevel or ApplicationLogLevel. Learn more here https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-resource-function.html#sam-function-loggingconfig.
+    LoggingConfig:
+      LogFormat: JSON
+
+Parameters:
+  ElasticUrlParam:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: '/telemetry-collector/opensearch/url'
+  ElasticUsernameParam:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: '/telemetry-collector/opensearch/username'
+  ElasticPasswordParam:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: '/telemetry-collector/opensearch/password'
+  FQDN:
+    Type: String
+    Description: Fully Qualified Domain Name
+    Default: telemetry.edp-epam.com
+  ZoneId:
+    Type: String
+    Description: Route53 Zone ID. Default to edp-epam.com
+    Default: ZD3O2MG0LMVGG
+
+Resources:
+  # Create our SSL certificate
+  GenerateCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref FQDN
+      ValidationMethod: DNS
+      DomainValidationOptions:
+      - DomainName: !Ref FQDN
+        HostedZoneId: !Ref ZoneId
+
+  TelemetryApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      Domain:
+        DomainName: !Ref FQDN
+        BasePath:
+          - '' # This sets the base path to the root
+        CertificateArn: !Ref GenerateCertificate
+        Route53:
+          HostedZoneId: !Ref ZoneId
+      MethodSettings:
+        - ResourcePath: /v1/submit
+          HttpMethod: POST
+          ThrottlingRateLimit: 1
+          ThrottlingBurstLimit: 1
+      DefinitionBody:
+        swagger: '2.0'
+        info:
+          title:
+            Ref: AWS::StackName
+        paths:
+          /v1/submit:
+            post:
+              x-amazon-apigateway-integration:
+                httpMethod: POST
+                type: aws_proxy
+                uri:
+                  Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CollectTelemetryFunction.Arn}/invocations
+      Tags:
+        user:tag: eks-core
+
+  CollectTelemetryFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      Description: Lambda function for collecting telemetry data.
+      MemorySize: 128
+      Timeout: 10
+      CodeUri: telemetry-collector/
+      Handler: telemetry-collector
+      Runtime: go1.x
+      Environment:
+        Variables:
+          ELASTIC_URL: !Ref 'ElasticUrlParam'
+          ELASTIC_USERNAME: !Ref 'ElasticUsernameParam'
+          ELASTIC_PASSWORD: !Ref 'ElasticPasswordParam'
+      PermissionsBoundary: arn:aws:iam::093899590031:policy/eo_role_boundary
+      Architectures:
+      - x86_64
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - arn:aws:ssm:region:account-id:parameter/telemetry-collector/opensearch/*
+      Events:
+        SubmitMetricsV1:
+          Type: Api
+          Properties:
+            Path: /v1/submit
+            Method: post
+            RestApiId:
+              Ref: TelemetryApi
+      VpcConfig:
+        SecurityGroupIds:
+          - sg-0fa1cd0e1467b5341
+        SubnetIds:
+          - subnet-02d316396aac5c437
+      Tags:
+        user:tag: eks-core
+
+Outputs:
+  TelemetryApi:
+    Description: API Gateway endpoint URL for prod environment for Collect Telemetry function
+    Value: !Sub "https://${FQDN}"
+  CollectTelemetryFunction:
+    Description: First Lambda Function ARN
+    Value: !GetAtt CollectTelemetryFunction.Arn
+  CollectTelemetryFunctionIamRole:
+    Description: Implicit IAM Role created for Collect Telemetry function
+    Value: !GetAtt CollectTelemetryFunctionRole.Arn

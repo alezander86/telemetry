@@ -1,0 +1,24 @@
+{
+  "platformMetrics": {
+    "codebaseMetrics": [
+      {
+        "lang": "Go",
+        "framework": "Gin",
+        "buildTool": "Make",
+        "strategy": "Microservices",
+        "type": "Backend",
+        "versioning": "Semantic"
+      }
+    ],
+    "cdPipelineMetrics": [
+      {
+        "deploymentType": "Kubernetes",
+        "numberOfStages": 3
+      }
+    ],
+    "gitProviders": ["github"],
+    "jiraEnabled": true,
+    "registryType": "Docker",
+    "version": "1.0.0"
+  }
+}
